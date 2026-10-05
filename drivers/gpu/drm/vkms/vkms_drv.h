@@ -62,7 +62,7 @@ int vkms_output_init(struct vkms_device *vkmsdev);
 struct drm_plane *vkms_plane_init(struct vkms_device *vkmsdev);
 
 /* Gem stuff */
-int vkms_gem_fault(struct vm_fault *vmf);
+vm_fault_t vkms_gem_fault(struct vm_fault *vmf);
 
 int vkms_dumb_create(struct drm_file *file, struct drm_device *dev,
 		     struct drm_mode_create_dumb *args);

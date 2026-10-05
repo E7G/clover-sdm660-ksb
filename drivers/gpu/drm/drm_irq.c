@@ -101,7 +101,7 @@
 int drm_irq_install(struct drm_device *dev, int irq)
 {
 	int ret;
-	unsigned long sh_flags = IRQF_PERF_CRITICAL;
+	unsigned long sh_flags = 0; /* IRQF_PERF_CRITICAL is a CAF extension absent from this tree */
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
 		return -EINVAL;
