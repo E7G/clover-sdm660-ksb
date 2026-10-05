@@ -502,7 +502,7 @@ static int msm_drm_init(struct device *dev, struct drm_driver *drv)
 			goto err_msm_uninit;
 		}
 	}
-	dma_set_max_seg_size(dev, DMA_BIT_MASK(32));
+	dma_set_max_seg_size(dev, (unsigned int)DMA_BIT_MASK(32));
 
 	msm_gem_shrinker_init(ddev);
 
@@ -637,7 +637,7 @@ static int msm_drm_init(struct device *dev, struct drm_driver *drv)
 			goto err_msm_uninit;
 		}
 	}
-	irq_set_perf_affinity(platform_get_irq(pdev, 0));
+	irq_set_perf_affinity(platform_get_irq(pdev, 0), 0);
 
 	ret = drm_dev_register(ddev, 0);
 	if (ret)
@@ -1234,7 +1234,7 @@ static int add_components_mdp(struct device *mdp_dev,
 
 static int compare_name_mdp(struct device *dev, void *data)
 {
-	return (strnstr(dev_name(dev), "mdp") != NULL);
+	return (strnstr(dev_name(dev), "mdp", strlen(dev_name(dev))) != NULL);
 }
 
 static int add_display_components(struct device *dev,
