@@ -33,7 +33,12 @@ f0()    { v=$(field "$1" "$2"); printf '%s' "${v:-0}"; }
 
 LAUNCHER=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null | tail -1)
 case "$LAUNCHER" in */*) ;; *) LAUNCHER="" ;; esac
-APPS=${APPS:-"com.android.settings/.Settings $LAUNCHER"}
+# NOTE: the HOME/launcher app is deliberately NOT measured.  Android relaunches
+# the HOME app immediately after `am force-stop`, so `am start -W` there times a
+# warm resume of an already-running task (observed on clover: TotalTime 0 ms,
+# while a genuine cold start of the same build measures ~530 ms).  Comparing it
+# A/B measures framework restart semantics, not kernel performance.
+APPS=${APPS:-"com.android.settings/.Settings com.android.deskclock/.DeskClock com.android.documentsui/.LauncherActivity com.android.contacts/.activities.PeopleActivity org.lineageos.jelly/.MainActivity"}
 
 {
 printf '{'
@@ -141,13 +146,24 @@ for a in $APPS; do
   i=1
   while [ $i -le $RUNS ]; do
     i=$((i+1))
-    am force-stop "${a%%/*}" 2>/dev/null
-    sleep 1
-    t=$(am start -W -n "$a" 2>/dev/null | grep -m1 TotalTime | tr -dc 0-9)
+    pkg=${a%%/*}
+    am force-stop "$pkg" 2>/dev/null
+    # am force-stop is asynchronous: wait until the process is really gone so the
+    # sample is a genuine cold start (LaunchState COLD).  A launch that still has
+    # a live process is WARM and must not be compared across builds.
+    n=0
+    while [ $n -lt 12 ]; do
+      pidof "$pkg" >/dev/null 2>&1 || break
+      sleep 0.25
+      n=$((n+1))
+    done
+    o=$(am start -W -n "$a" 2>/dev/null)
+    t=$(printf '%s' "$o" | grep -m1 TotalTime | tr -dc 0-9)
+    st=$(printf '%s' "$o" | grep -m1 LaunchState | sed 's/.*LaunchState: *//' | tr -dc 'A-Z')
     [ -n "$t" ] || continue
     [ $f -eq 1 ] || printf ','
     f=0
-    printf '{"app":"%s","total_ms":%s}' "$a" "$t"
+    printf '{"app":"%s","total_ms":%s,"state":"%s"}' "$a" "$t" "$st"
     sleep 1
   done
 done
