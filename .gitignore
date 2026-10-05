@@ -1,0 +1,9 @@
+/out/
+/out-*/
+*.o
+*.cmd
+*.ko
+*.mod
+*.mod.c
+*.tmp
+__pycache__/
