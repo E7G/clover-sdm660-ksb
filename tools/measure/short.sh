@@ -1,150 +1,144 @@
 #!/system/bin/sh
-# Clover KS-SB Hybrid 4.19 - short automated measurement pass.
+# Clover KS-SB Hybrid 4.19 - short automated measurement pass (POSIX/mksh safe).
 #
-#   adb push tools/measure/short.sh /data/local/tmp/ && adb shell sh /data/local/tmp/short.sh [out.json]
+#   adb push tools/measure/short.sh /data/local/tmp/
+#   adb shell su -c 'sh /data/local/tmp/short.sh /data/local/tmp/kss-short.json'
 #
-# Collects the four metric families from the design document:
-#   idle/suspend, responsiveness, sustained performance, and configuration.
-# Safe to run repeatedly; does not change any tunable.
+# Root is only needed for debugfs (suspend_stats, wakeup_sources); everything
+# else works as the shell user. This script changes no tunable.
 
 OUT=${1:-/data/local/tmp/kss-short.json}
-APPS="com.android.settings/.Settings com.miui.home/.launcher.Launcher"
+RUNS=${RUNS:-5}
+LABEL=${LABEL:-unset}
 
 mount -t debugfs none /sys/kernel/debug 2>/dev/null
+rd()  { cat "$1" 2>/dev/null; }
+num() { tr -dc 0-9 < "$1" 2>/dev/null; }
+clean() { tr -d '"\\' ; }
+mem() { grep "^$1:" /proc/meminfo | tr -dc 0-9; }
 
-esc() { printf '%s' "$1" | tr -d '"\\'; }
-kv() { printf ' "%s":"%s"' "$1" "$(esc "$2")"; }
-kn() { printf ' "%s":%s' "$1" "$2"; }
+LAUNCHER=$(cmd package resolve-activity --brief -c android.intent.category.HOME 2>/dev/null | tail -1)
+APPS=${APPS:-"com.android.settings/.Settings $LAUNCHER"}
 
 {
 printf '{'
-kv build "$(cat /proc/version)"
-kn uptime_s "$(cut -d. -f1 /proc/uptime)"
+printf '"label":"%s"' "$LABEL"
+printf ',"build":"%s"' "$(rd /proc/version | clean)"
+printf ',"model":"%s"' "$(getprop ro.product.model | clean)"
+printf ',"android":"%s"' "$(getprop ro.build.version.release | clean)"
+printf ',"uptime_s":%s' "$(cut -d. -f1 /proc/uptime)"
 
-# --- cpu frequency / governor
 printf ',"cpufreq":['
-first=1
+f=1
 for p in /sys/devices/system/cpu/cpufreq/policy*; do
   [ -d "$p" ] || continue
-  [ $first -eq 1 ] || printf ','
-  first=0
-  printf '{'
-  kv policy "$(basename $p)"
-  kv governor "$(cat $p/scaling_governor 2>/dev/null)"
-  kn min_khz "$(cat $p/scaling_min_freq 2>/dev/null)"
-  kn max_khz "$(cat $p/scaling_max_freq 2>/dev/null)"
-  printf ',"time_in_state":{'
-  tfirst=1
+  [ $f -eq 1 ] || printf ','
+  f=0
+  printf '{"policy":"%s","governor":"%s","min_khz":%s,"max_khz":%s,"time_in_state":{' \
+    "$(basename $p)" "$(rd $p/scaling_governor)" "$(num $p/scaling_min_freq)" "$(num $p/scaling_max_freq)"
+  t=1
   while read freq us; do
     [ -n "$freq" ] || continue
-    [ $tfirst -eq 1 ] || printf ','
-    tfirst=0
+    [ $t -eq 1 ] || printf ','
+    t=0
     printf '"%s":%s' "$freq" "$us"
   done < $p/stats/time_in_state
   printf '}}'
 done
 printf ']'
 
-# --- cpuidle
 printf ',"cpuidle":['
-first=1
+f=1
 for s in /sys/devices/system/cpu/cpu0/cpuidle/state*; do
   [ -d "$s" ] || continue
-  [ $first -eq 1 ] || printf ','
-  first=0
-  printf '{'
-  kv name "$(cat $s/name)"
-  kn disable "$(cat $s/disable)"
-  kn usage "$(cat $s/usage)"
-  kn time_us "$(cat $s/time)"
-  printf '}'
+  [ $f -eq 1 ] || printf ','
+  f=0
+  printf '{"name":"%s","disable":%s,"usage":%s,"time_us":%s}' \
+    "$(rd $s/name)" "$(num $s/disable)" "$(num $s/usage)" "$(num $s/time)"
 done
 printf ']'
 
-# --- thermal
 printf ',"thermal":['
-first=1
+f=1
 for z in /sys/class/thermal/thermal_zone*; do
   [ -f "$z/temp" ] || continue
-  [ $first -eq 1 ] || printf ','
-  first=0
-  printf '{'
-  kv zone "$(basename $z)"
-  kv type "$(cat $z/type 2>/dev/null)"
-  kn temp_milli "$(cat $z/temp 2>/dev/null)"
-  printf '}'
+  [ $f -eq 1 ] || printf ','
+  f=0
+  printf '{"zone":"%s","type":"%s","temp_milli":%s}' "$(basename $z)" "$(rd $z/type)" "$(num $z/temp)"
 done
 printf ']'
 
-# --- gpu
-printf ',"gpu":{'
-kv governor "$(cat /sys/class/devfreq/5000000.qcom,kgsl-3d0/governor 2>/dev/null)"
-kn cur_mhz "$(cat /sys/class/kgsl/kgsl-3d0/gpuclk 2>/dev/null)"
-kn busy_pct "$(cat /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage 2>/dev/null | tr -dc 0-9)"
-kn idle_timer_ms "$(cat /sys/class/kgsl/kgsl-3d0/idle_timer 2>/dev/null)"
-printf '}'
+printf ',"gpu":{"governor":"%s","cur_hz":%s,"busy_pct":%s,"idle_timer_ms":%s,"min_pwrlevel":"%s","max_pwrlevel":"%s"}' \
+  "$(rd /sys/class/devfreq/5000000.qcom,kgsl-3d0/governor)" \
+  "$(num /sys/class/kgsl/kgsl-3d0/gpuclk)" \
+  "$(rd /sys/class/kgsl/kgsl-3d0/gpu_busy_percentage | tr -dc 0-9)" \
+  "$(num /sys/class/kgsl/kgsl-3d0/idle_timer)" \
+  "$(rd /sys/class/kgsl/kgsl-3d0/min_pwrlevel | clean)" \
+  "$(rd /sys/class/kgsl/kgsl-3d0/max_pwrlevel | clean)"
 
-# --- memory
-printf ',"memory":{'
-for k in MemTotal MemFree MemAvailable Cached SwapTotal SwapFree; do
-  kn "$k" "$(grep "^$k:" /proc/meminfo | tr -dc 0-9)"
-done
-kn zram_disksize "$(cat /sys/block/zram0/disksize 2>/dev/null)"
-kv zram_comp "$(cat /sys/block/zram0/comp_algorithm 2>/dev/null)"
-kv mglru "$(cat /sys/kernel/mm/lru_gen/enabled 2>/dev/null)"
-kn psi_present "$([ -d /proc/pressure ] && echo 1 || echo 0)"
-printf '}'
+printf ',"memory":{"MemTotal":%s,"MemFree":%s,"MemAvailable":%s,"Cached":%s,"SwapTotal":%s,"SwapFree":%s,"zram_disksize":%s,"zram_comp":"%s","mglru":"%s","psi_present":%s,"workqueue_cpumask":"%s"}' \
+  "$(mem MemTotal)" "$(mem MemFree)" "$(mem MemAvailable)" "$(mem Cached)" \
+  "$(mem SwapTotal)" "$(mem SwapFree)" \
+  "$(num /sys/block/zram0/disksize)" "$(rd /sys/block/zram0/comp_algorithm | clean)" \
+  "$(rd /sys/kernel/mm/lru_gen/enabled | clean)" \
+  "$([ -d /proc/pressure ] && echo 1 || echo 0)" \
+  "$(rd /sys/devices/virtual/workqueue/cpumask | clean)"
 
-# --- suspend
-printf ',"suspend":{'
+printf ',"suspend":{"stats":{'
+f=1
 if [ -f /sys/kernel/debug/suspend_stats ]; then
-  for k in success fail last_failed_dev last_failed_errno; do
-    v="$(grep -m1 "^$k:" /sys/kernel/debug/suspend_stats | cut -d: -f2- | tr -d ' \t')"
-    [ -n "$v" ] && kv "$k" "$v"
-  done
+  while IFS=: read k v; do
+    case "$k" in
+      success|fail|last_failed_dev|last_failed_errno|last_failed_step)
+        v=$(printf '%s' "$v" | clean)
+        [ -n "$v" ] || continue
+        [ $f -eq 1 ] || printf ','
+        f=0
+        printf '"%s":"%s"' "$k" "$v" ;;
+    esac
+  done < /sys/kernel/debug/suspend_stats
 fi
-printf ',"wakeup_sources":['
-first=1
-if [ -f /sys/kernel/debug/wakeup_sources ]; then
-  head -1 /sys/kernel/debug/wakeup_sources >/dev/null
-  tail -n +2 /sys/kernel/debug/wakeup_sources | sort -k6 -nr | head -12 | while read -r name active c1 c2 c3 c4 c5 c6 c7 c8; do
-    [ -n "$name" ] || continue
-    printf '%s{"name":"%s","active_count":%s,"active_since_ms":%s}'       "${\$first:+,}" "$name" "${active:-0}" "${c7:-0}"
-    first=2
-  done
-fi
-printf ']'
+printf '},"wakeup_sources":['
+awk 'NR>1 && NF>=7 {print $7"\t"$1"\t"$2"\t"$6}' /sys/kernel/debug/wakeup_sources 2>/dev/null \
+  | sort -k1,1nr | head -12 \
+  | awk 'BEGIN{n=0} {printf "%s{\"name\":\"%s\",\"total_time_ms\":%s,\"active_count\":%s,\"active_since_ms\":%s}", (n++?",":""), $2,$1,$3,$4}'
+printf ']}'
 printf '}'
 
-# --- responsiveness: app launch latency, N runs each
-RUNS=${RUNS:-5}
 printf ',"app_launch_ms":['
-first=1
+f=1
 for a in $APPS; do
-  for i in $(seq 1 $RUNS); do
+  [ -n "$a" ] || continue
+  i=1
+  while [ $i -le $RUNS ]; do
+    i=$((i+1))
     am force-stop "${a%%/*}" 2>/dev/null
     sleep 1
     t=$(am start -W -n "$a" 2>/dev/null | grep -m1 TotalTime | tr -dc 0-9)
     [ -n "$t" ] || continue
-    [ $first -eq 1 ] || printf ','
-    first=0
+    [ $f -eq 1 ] || printf ','
+    f=0
     printf '{"app":"%s","total_ms":%s}' "$a" "$t"
     sleep 1
   done
 done
 printf ']'
 
-# --- frame stats
 printf ',"gfxinfo":{'
-kn total_frames "$(dumpsys gfxinfo 2>/dev/null | grep -m1 'Total frames rendered' | tr -dc 0-9)"
-kn janky_frames "$(dumpsys gfxinfo 2>/dev/null | grep -m1 'Janky frames' | tr -dc 0-9)"
-kn p50_ms "$(dumpsys gfxinfo 2>/dev/null | grep -m1 '50th percentile' | tr -dc 0-9)"
-kn p90_ms "$(dumpsys gfxinfo 2>/dev/null | grep -m1 '90th percentile' | tr -dc 0-9)"
-kn p95_ms "$(dumpsys gfxinfo 2>/dev/null | grep -m1 '95th percentile' | tr -dc 0-9)"
-kn p99_ms "$(dumpsys gfxinfo 2>/dev/null | grep -m1 '99th percentile' | tr -dc 0-9)"
+GF=/data/local/tmp/.kss-gfxinfo.txt
+dumpsys gfxinfo 2>/dev/null > $GF
+printf '"total_frames":%s,"janky_frames":%s,"p50_ms":%s,"p90_ms":%s,"p95_ms":%s,"p99_ms":%s' \
+  "$(grep -m1 'Total frames rendered' $GF | tr -dc 0-9)" \
+  "$(grep -m1 'Janky frames' $GF | tr -dc 0-9)" \
+  "$(grep -m1 '50th percentile' $GF | tr -dc 0-9)" \
+  "$(grep -m1 '90th percentile' $GF | tr -dc 0-9)" \
+  "$(grep -m1 '95th percentile' $GF | tr -dc 0-9)" \
+  "$(grep -m1 '99th percentile' $GF | tr -dc 0-9)"
+rm -f $GF
 printf '}'
 
 printf '}\n'
 } > "$OUT" 2>/dev/null
 
 echo "wrote $OUT"
+wc -c < "$OUT"

@@ -150,11 +150,14 @@ def splice_kernel(orig, new_kernel):
     start = lay["kernel_offset"]
     out[start:start + len(new_kernel)] = new_kernel
     out[start + len(new_kernel):start + region] = b"\x00" * (region - len(new_kernel))
-    struct.pack_into("<I", out, 8, len(new_kernel))
     if bytes(out[start + region:]) != bytes(orig[start + region:]):
         raise SystemExit("internal error: bytes after the kernel region changed")
-    if bytes(out[:start]) != bytes(orig[:start]):
-        raise SystemExit("internal error: bytes before the kernel changed")
+    # The kernel_size field at offset 8 is the only thing allowed to differ
+    # ahead of the kernel, so compare the rest of that region byte for byte.
+    if bytes(out[:8]) != bytes(orig[:8]) or bytes(out[12:start]) != bytes(orig[12:start]):
+        raise SystemExit("internal error: bytes before the kernel changed "
+                         "(other than the kernel_size field)")
+    struct.pack_into("<I", out, 8, len(new_kernel))
     return bytes(out), h, lay
 
 

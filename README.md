@@ -51,6 +51,20 @@ tools/build.sh package    # splice Image.gz into a copy of the stock boot image
 tools/build.sh all
 ```
 
+The `clover.config` fragment is **mandatory**: the defconfig alone has no ReSukiSU,
+no DroidSpaces container/graphics support and the wrong `CONFIG_LOCALVERSION`.
+Always build through `tools/build.sh` (or replicate the defconfig + merge_config +
+olddefconfig sequence described in section 6 of the design document).
+
+Clone with submodules, otherwise `drivers/kernelsu` dangles and the build stops in
+ReSukiSU Kbuild with *use ReSukiSU as a git submodule instead of copying code*:
+
+```sh
+git clone --recursive https://github.com/E7G/clover-sdm660-ksb
+# or, in an existing checkout:
+git submodule update --init --recursive
+```
+
 Environment overrides: `SRC`, `OUT`, `STOCK` (stock boot image), `JOBS`, `CLANG`.
 The stock boot image is needed because **only `Image.gz` is rebuilt** — the ramdisk,
 both device trees and the AVB metadata are reused byte-for-byte from the vendor image.
@@ -105,7 +119,8 @@ fastboot flash boot boot-backup.img
 | Path | Contents |
 |---|---|
 | `arch/arm64/configs/vendor/xiaomi/` | `sdm660_defconfig` + `clover.config` fragment |
-| `drivers/kernelsu/` | vendored ReSukiSU kernel driver (manual hook) |
+| `drivers/ReSukiSU/` | ReSukiSU **git submodule** (pinned) - run `git submodule update --init` after cloning |
+| `drivers/kernelsu` | symlink to `ReSukiSU/kernel`; what kbuild actually compiles |
 | `tools/bootimg.py` | boot image packer (header v2, fixed-offset splice) |
 | `tools/build.sh` | config / kernel / package driver |
 | `tools/measure/` | on-device measurement scripts |
