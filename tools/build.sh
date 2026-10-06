@@ -62,9 +62,10 @@ do_config() {
 
 do_kernel() {
 	apply_resukisu_susfs_compat
-	echo "=== kernel: Image.gz"
-	make O="$OUT" ARCH=arm64 $TC -j"$JOBS" Image.gz
+	echo "=== kernel: Image.gz + Clover DTB"
+	make O="$OUT" ARCH=arm64 $TC -j"$JOBS" Image.gz vendor/qcom/sdm660-mtp-clover.dtb
 	ls -l "$OUT/arch/arm64/boot/Image.gz"
+	ls -l "$OUT/arch/arm64/boot/dts/vendor/qcom/sdm660-mtp-clover.dtb"
 }
 
 do_package() {
@@ -73,7 +74,9 @@ do_package() {
 	rev=$(grep -oP '(?<=CONFIG_LOCALVERSION=")[^"]*' "$OUT/.config" || echo unknown)
 	local out="$OUT/boot-${rev#-}.img"
 	echo "=== package: $k -> $out"
-	tools/bootimg.py repack "$STOCK" "$k" "$out"
+	local dtb="$OUT/arch/arm64/boot/dts/vendor/qcom/sdm660-mtp-clover.dtb"
+	[ -f "$dtb" ] || { echo "error: missing Clover DTB: $dtb" >&2; exit 1; }
+	tools/bootimg.py repack "$STOCK" "$k" "$out" --dtb "$dtb"
 	sha256sum "$out" | tee "$out.sha256"
 	echo "=== flash with:"
 	echo "    fastboot flash boot $out"

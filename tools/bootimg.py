@@ -218,10 +218,45 @@ def splice_kernel(orig, new_kernel):
     return bytes(out), h, lay, len(trailer)
 
 
+def splice_dtb(image, new_dtb):
+    """Replace both Clover DTB copies in place without moving any region."""
+    gz, trailer, h, lay = kernel_parts(image)
+    size = h["dtb_size"]
+    if len(new_dtb) != size:
+        raise SystemExit("error: new DTB is %d B but boot header DTB is %d B; "
+                         "fixed-offset replacement requires an exact size match"
+                         % (len(new_dtb), size))
+    if new_dtb[:4] != b"\xd0\x0d\xfe\xed":
+        raise SystemExit("error: new DTB does not start with FDT magic d00dfeed")
+    if len(trailer) < size:
+        raise SystemExit("error: kernel appended area (%d B) is smaller than DTB (%d B)"
+                         % (len(trailer), size))
+
+    appended_off = lay["kernel_offset"] + len(gz)
+    header_dtb_off = lay["dtb_offset"]
+    old_appended = image[appended_off:appended_off + size]
+    old_header = image[header_dtb_off:header_dtb_off + size]
+    if old_appended != old_header:
+        raise SystemExit("error: appended Clover DTB and header DTB differ; refusing "
+                         "blind dual replacement")
+    if old_header[:4] != b"\xd0\x0d\xfe\xed":
+        raise SystemExit("error: existing DTB does not start with FDT magic")
+
+    out = bytearray(image)
+    out[appended_off:appended_off + size] = new_dtb
+    out[header_dtb_off:header_dtb_off + size] = new_dtb
+    return bytes(out), appended_off, header_dtb_off
+
+
 def cmd_repack(args):
     orig = open(args.orig, "rb").read()
     new_kernel = open(args.kernel, "rb").read()
     out, h, lay, tlen = splice_kernel(orig, new_kernel)
+    dtb_offsets = None
+    if args.dtb:
+        new_dtb = open(args.dtb, "rb").read()
+        out, app_off, hdr_off = splice_dtb(out, new_dtb)
+        dtb_offsets = (app_off, hdr_off, len(new_dtb))
     open(args.out, "wb").write(out)
     total = len(new_kernel) + tlen
     print("repacked  %s + %s -> %s" % (args.orig, args.kernel, args.out))
@@ -230,6 +265,9 @@ def cmd_repack(args):
     print("  region %d B, zero padding %d B, spare vs region %d B"
           % (lay["kernel_region"], h["kernel_size"] - total,
              lay["kernel_region"] - total))
+    if dtb_offsets:
+        print("  dtb    %d B replaced at appended 0x%x + header 0x%x"
+              % (dtb_offsets[2], dtb_offsets[0], dtb_offsets[1]))
     print("  md5    %s" % hashlib.md5(out).hexdigest())
     return 0
 
@@ -273,6 +311,7 @@ def main():
     p.add_argument("orig")
     p.add_argument("kernel")
     p.add_argument("out")
+    p.add_argument("--dtb", help="exact-size Clover DTB to replace in both fixed locations")
     p.set_defaults(func=cmd_repack)
 
     p = sub.add_parser("verify", help="round-trip proof: repack with the original kernel")
