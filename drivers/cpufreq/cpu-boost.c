@@ -51,7 +51,7 @@ static bool input_boost_enabled;
 
 #ifdef CONFIG_MACH_XIAOMI_CLOVER
 /* KS-SB: short race-to-idle input burst; never pins either cluster at max. */
-static unsigned int input_boost_ms = 100;
+static unsigned int input_boost_ms = 180;
 #else
 static unsigned int input_boost_ms = 40;
 #endif
@@ -261,6 +261,21 @@ static void cpuboost_input_event(struct input_handle *handle,
 
 	if (!input_boost_enabled)
 		return;
+
+	/*
+	 * Boost once per real interaction, not for every motion/release event.
+	 * This keeps long scrolling from turning a short race-to-idle burst into
+	 * a quasi-permanent frequency floor.
+	 */
+	if (type == EV_KEY) {
+		if (value != 1)
+			return;
+	} else if (type == EV_ABS) {
+		if (code != ABS_MT_TRACKING_ID || value < 0)
+			return;
+	} else {
+		return;
+	}
 
 	now = ktime_to_us(ktime_get());
 	if ((now - last_input_time) < (input_boost_ms * USEC_PER_MSEC))
