@@ -66,6 +66,81 @@ cpu_boost_attr_rw(sched_boost_on_input);
 
 static bool sched_boost_active;
 
+#ifdef CONFIG_MACH_XIAOMI_CLOVER
+enum ks_sb_profile_id {
+	KS_SB_PROFILE_BATTERY = 0,
+	KS_SB_PROFILE_BALANCED,
+	KS_SB_PROFILE_PERFORMANCE,
+};
+
+static unsigned int ks_sb_profile = KS_SB_PROFILE_BALANCED;
+
+static const char * const ks_sb_profile_names[] = {
+	[KS_SB_PROFILE_BATTERY] = "battery",
+	[KS_SB_PROFILE_BALANCED] = "balanced",
+	[KS_SB_PROFILE_PERFORMANCE] = "performance",
+};
+
+static void ks_sb_apply_profile(unsigned int profile)
+{
+	unsigned int cpu;
+	unsigned int little_khz, big_khz, boost_ms;
+
+	switch (profile) {
+	case KS_SB_PROFILE_BATTERY:
+		boost_ms = 180;
+		little_khz = 1113600;
+		big_khz = 1401600;
+		break;
+	case KS_SB_PROFILE_PERFORMANCE:
+		boost_ms = 220;
+		little_khz = 1536000;
+		big_khz = 1958400;
+		break;
+	case KS_SB_PROFILE_BALANCED:
+	default:
+		profile = KS_SB_PROFILE_BALANCED;
+		boost_ms = 180;
+		little_khz = 1401600;
+		big_khz = 1747200;
+		break;
+	}
+
+	input_boost_ms = boost_ms;
+	sched_boost_on_input = 0;
+	for_each_possible_cpu(cpu)
+		per_cpu(sync_info, cpu).input_boost_freq =
+			cpu < 4 ? little_khz : big_khz;
+	input_boost_enabled = true;
+	ks_sb_profile = profile;
+}
+
+static ssize_t show_profile(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n",
+			 ks_sb_profile_names[ks_sb_profile]);
+}
+
+static ssize_t store_profile(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	if (sysfs_streq(buf, "battery") || sysfs_streq(buf, "0"))
+		ks_sb_apply_profile(KS_SB_PROFILE_BATTERY);
+	else if (sysfs_streq(buf, "balanced") || sysfs_streq(buf, "1"))
+		ks_sb_apply_profile(KS_SB_PROFILE_BALANCED);
+	else if (sysfs_streq(buf, "performance") || sysfs_streq(buf, "2"))
+		ks_sb_apply_profile(KS_SB_PROFILE_PERFORMANCE);
+	else
+		return -EINVAL;
+
+	return count;
+}
+
+static struct kobj_attribute profile_attr =
+	__ATTR(profile, 0644, show_profile, store_profile);
+#endif
+
 static struct delayed_work input_boost_rem;
 static u64 last_input_time;
 
@@ -375,20 +450,13 @@ static int cpu_boost_init(void)
 	for_each_possible_cpu(cpu) {
 		s = &per_cpu(sync_info, cpu);
 		s->cpu = cpu;
-#ifdef CONFIG_MACH_XIAOMI_CLOVER
-		/*
-		 * Snapdragon 660 / clover:
-		 *   CPUs 0-3 (Silver): 1.4016 GHz
-		 *   CPUs 4-7 (Gold):   1.7472 GHz
-		 * Keep the burst below peak clocks so a touch finishes quickly
-		 * without turning every interaction into a thermal event.
-		 */
-		s->input_boost_freq = cpu < 4 ? 1401600 : 1747200;
-#endif
 	}
 #ifdef CONFIG_MACH_XIAOMI_CLOVER
-	/* Defaults above are non-zero, so enable the handler without a userspace write. */
-	input_boost_enabled = true;
+	/*
+	 * Balanced is the validated Clover default. Other profiles only alter
+	 * the short input burst; governor, WALT, KGSL and thermal stay untouched.
+	 */
+	ks_sb_apply_profile(KS_SB_PROFILE_BALANCED);
 #endif
 	cpufreq_register_notifier(&boost_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
 
@@ -409,6 +477,12 @@ static int cpu_boost_init(void)
 				&sched_boost_on_input_attr.attr);
 	if (ret)
 		pr_err("Failed to create sched_boost_on_input node: %d\n", ret);
+
+#ifdef CONFIG_MACH_XIAOMI_CLOVER
+	ret = sysfs_create_file(cpu_boost_kobj, &profile_attr.attr);
+	if (ret)
+		pr_err("Failed to create KS-SB profile node: %d\n", ret);
+#endif
 
 	ret = input_register_handler(&cpuboost_input_handler);
 	return 0;
