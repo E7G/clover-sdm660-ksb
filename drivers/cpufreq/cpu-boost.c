@@ -49,7 +49,12 @@ static struct work_struct input_boost_work;
 
 static bool input_boost_enabled;
 
+#ifdef CONFIG_MACH_XIAOMI_CLOVER
+/* KS-SB: short race-to-idle input burst; never pins either cluster at max. */
+static unsigned int input_boost_ms = 100;
+#else
 static unsigned int input_boost_ms = 40;
+#endif
 show_one(input_boost_ms);
 store_one(input_boost_ms);
 cpu_boost_attr_rw(input_boost_ms);
@@ -355,7 +360,21 @@ static int cpu_boost_init(void)
 	for_each_possible_cpu(cpu) {
 		s = &per_cpu(sync_info, cpu);
 		s->cpu = cpu;
+#ifdef CONFIG_MACH_XIAOMI_CLOVER
+		/*
+		 * Snapdragon 660 / clover:
+		 *   CPUs 0-3 (Silver): 1.4016 GHz
+		 *   CPUs 4-7 (Gold):   1.7472 GHz
+		 * Keep the burst below peak clocks so a touch finishes quickly
+		 * without turning every interaction into a thermal event.
+		 */
+		s->input_boost_freq = cpu < 4 ? 1401600 : 1747200;
+#endif
 	}
+#ifdef CONFIG_MACH_XIAOMI_CLOVER
+	/* Defaults above are non-zero, so enable the handler without a userspace write. */
+	input_boost_enabled = true;
+#endif
 	cpufreq_register_notifier(&boost_adjust_nb, CPUFREQ_POLICY_NOTIFIER);
 
 	cpu_boost_kobj = kobject_create_and_add("cpu_boost",
