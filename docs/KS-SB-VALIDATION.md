@@ -149,6 +149,22 @@ After flashing `v0.8.0-profile`:
 - KSU root: working
 - thermal fallback: 78/82 °C trips present
 
+## Hardware smoke test on persistent v0.8.0
+
+Read-only/service-level checks after a cold persistent boot:
+
+- Boot completed normally (`sys.boot_completed=1`).
+- Wi-Fi: `wlan0` UP/LOWER_UP; connected to 5 GHz 802.11ac at 866 Mbps link speed, usable=true.
+- USB/ADB: working throughout all boot/fastboot/regression cycles.
+- Charging/battery: AC charging path reported normally; 5 V / 0.9 A advertised current limit during the check; battery service healthy.
+- Touch/input: FocalTech `fts_ts`, gpio keys and hall switch are registered.
+- Audio: Android audio service and STREAM_MUSIC policy are present; fixed-volume mode is disabled.
+- Camera: CameraService reports 2 camera devices.
+- Sensors: 30 hardware sensors enumerated; BMI120 accel/gyro, CM3232 ALS and hall sensor are present, with live sensor events.
+- Bluetooth: BluetoothManager service exists and reports zero crashes, but Bluetooth was user-disabled during this check. Radio connectivity was intentionally not toggled.
+
+These checks prove driver/service enumeration and basic subsystem availability; they do not replace an interactive camera capture, speaker playback or Bluetooth pairing test.
+
 ## Still required before a stable release
 
 These are intentionally not marked complete yet:
