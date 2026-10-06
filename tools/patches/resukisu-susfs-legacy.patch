@@ -1,0 +1,44 @@
+diff --git a/kernel/supercall/dispatch.c b/kernel/supercall/dispatch.c
+index 242b5711..0be0b9ba 100644
+--- a/kernel/supercall/dispatch.c
++++ b/kernel/supercall/dispatch.c
+@@ -986,6 +986,13 @@ static int do_get_kernel_patch_implement(void __user *arg)
+ }
+
+ #ifdef CONFIG_KSU_SUSFS
++#ifdef KSU_COMPAT_SUSFS_LEGACY_PRCTL
++int ksu_handle_susfs_cmd(unsigned int cmd, void __user **arg)
++{
++    /* SUSFS v1.5.x userspace uses prctl(0xDEADBEEF, ...), not supercall. */
++    return 0;
++}
++#else
+ int ksu_handle_susfs_cmd(unsigned int cmd, void __user **arg)
+ {
+     switch (cmd) {
+@@ -1068,7 +1075,8 @@ int ksu_handle_susfs_cmd(unsigned int cmd, void __user **arg)
+     }
+     return 0;
+ }
+-#endif
++#endif /* !KSU_COMPAT_SUSFS_LEGACY_PRCTL */
++#endif /* CONFIG_KSU_SUSFS */
+
+ #ifdef CONFIG_KSU_TOOLKIT_SUPPORT
+ int ksu_try_handle_toolkit_cmd(int magic2, unsigned int cmd, void __user **arg)
+diff --git a/kernel/tools/susfs_compat.mk b/kernel/tools/susfs_compat.mk
+index a51f668f..ac3a1dc6 100644
+--- a/kernel/tools/susfs_compat.mk
++++ b/kernel/tools/susfs_compat.mk
+@@ -6,3 +6,11 @@ ifeq ($(shell grep -q "ksu_selinux_hide_running" $(srctree)/security/selinux/hoo
+ $(info -- $(REPO_NAME)/susfs_feature_check: selinux_hide manual hook found)
+ ccflags-y += -DKSU_COMPAT_HAS_SUSFS_FEATURE_SELINUX_HIDE
+ endif
++
++# Clover/non-GKI 4.19: SUSFS v1.5.x uses the legacy prctl ABI.
++# Keep ReSukiSU's modern reboot/supercall path out of this build; the kernel
++# tree provides a compatibility bridge for the v1.5.x userspace binary.
++ifeq ($(shell grep -qE '^#define SUSFS_VERSION "v1\.5\.' $(srctree)/include/linux/susfs.h; echo $$?),0)
++$(info -- $(REPO_NAME)/susfs_feature_check: legacy SUSFS v1.5.x prctl ABI)
++ccflags-y += -DKSU_COMPAT_SUSFS_LEGACY_PRCTL
++endif

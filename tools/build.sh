@@ -29,7 +29,27 @@ TC="$TC CLANG_TRIPLE=aarch64-linux-gnu-"
 
 cd "$SRC"
 
+apply_resukisu_susfs_compat() {
+	local ksu="$SRC/drivers/ReSukiSU"
+	local patch="$SRC/tools/patches/resukisu-susfs-legacy.patch"
+	[ -f "$patch" ] || return 0
+	[ -d "$ksu/.git" ] || [ -f "$ksu/.git" ] || {
+		echo "error: ReSukiSU submodule is not initialized: $ksu" >&2
+		exit 1
+	}
+	if git -C "$ksu" apply --check "$patch" >/dev/null 2>&1; then
+		echo "=== applying ReSukiSU SUSFS v1.5.x compatibility patch"
+		git -C "$ksu" apply "$patch"
+	elif git -C "$ksu" apply --reverse --check "$patch" >/dev/null 2>&1; then
+		echo "=== ReSukiSU SUSFS compatibility patch already applied"
+	else
+		echo "error: ReSukiSU SUSFS compatibility patch does not apply cleanly" >&2
+		exit 1
+	fi
+}
+
 do_config() {
+	apply_resukisu_susfs_compat
 	echo "=== config: sdm660_defconfig + $FRAGMENT"
 	mkdir -p "$OUT"
 	rm -f "$OUT/.config"
@@ -41,6 +61,7 @@ do_config() {
 }
 
 do_kernel() {
+	apply_resukisu_susfs_compat
 	echo "=== kernel: Image.gz"
 	make O="$OUT" ARCH=arm64 $TC -j"$JOBS" Image.gz
 	ls -l "$OUT/arch/arm64/boot/Image.gz"

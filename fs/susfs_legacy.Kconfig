@@ -1,0 +1,26 @@
+if KSU_SUSFS
+
+config KSU_SUSFS_HAS_MAGIC_MOUNT
+    bool "SUSFS v1.5.x: KernelSU magic-mount integration"
+    default y
+
+config KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT
+    bool "SUSFS v1.5.x: auto-hide KernelSU default mounts"
+    depends on KSU_SUSFS_SUS_MOUNT
+    default y
+
+config KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+    bool "SUSFS v1.5.x: auto-hide bind mounts"
+    depends on KSU_SUSFS_SUS_MOUNT
+    default y
+
+config KSU_SUSFS_TRY_UMOUNT
+    bool "SUSFS v1.5.x: try-umount list"
+    default y
+
+config KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT
+    bool "SUSFS v1.5.x: auto-add bind mounts to try-umount"
+    depends on KSU_SUSFS_TRY_UMOUNT
+    default y
+
+endif
